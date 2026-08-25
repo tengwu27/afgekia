@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bookingRequestSchema, isBookingTransitionAllowed, isIanaTimezone, isProjectTransitionAllowed, projectSchema, projectStageSchema, validateProgressForStatus } from "@/lib/validation";
+import { bookingRequestSchema, isBookingTransitionAllowed, isIanaTimezone, isProjectTransitionAllowed, milestoneUpdateSchema, projectSchema, projectStageSchema, validateProgressForStatus } from "@/lib/validation";
 
 function validBooking() {
   return { ownerId: "00000000-0000-4000-8000-000000000001", serviceId: "10000000-0000-4000-8000-000000000001", fullName: "Ada Client", email: "ADA@EXAMPLE.COM", phone: "", timezone: "America/Los_Angeles", preferredAt: new Date(Date.now() + 172_800_000).toISOString(), alternateAt: "", message: "I need help creating a calmer delivery plan for our launch.", privacyConsent: "on", formStartedAt: Date.now() - 10_000, website: "" };
@@ -59,5 +59,28 @@ describe("listing project validation", () => {
         changeType: "material",
       }).success,
     ).toBe(false);
+  });
+
+  it("validates full milestone updates and material-change reasons", () => {
+    const input = {
+      projectId: "10000000-0000-4000-8000-000000000001",
+      milestoneId: "20000000-0000-4000-8000-000000000001",
+      projectStageId: "",
+      title: "Photography complete",
+      description: "Images are ready for launch.",
+      status: "active",
+      dueDate: "2026-09-12",
+      position: 30,
+      clientVisible: true,
+      changeType: "material",
+      changeReason: "too short",
+    };
+    expect(milestoneUpdateSchema.safeParse(input).success).toBe(false);
+    expect(
+      milestoneUpdateSchema.safeParse({
+        ...input,
+        changeReason: "The launch sequence and seller-visible due date changed.",
+      }).success,
+    ).toBe(true);
   });
 });

@@ -1,13 +1,105 @@
-import Link from "next/link";
+import { Suspense } from "react";
 
-import { StatusBadge } from "@/components/status-badge";
-import { Progress } from "@/components/ui/progress";
+import { ProjectBoard } from "@/components/project-board";
+import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceHeading } from "@/components/workspace-heading";
 import { requireOwner } from "@/lib/auth";
-import { formatDate } from "@/lib/format";
+import type { BoardMilestone, BoardProject, BoardStage } from "@/lib/project-board";
+import { listingStageLabels } from "@/lib/projects";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function OwnerProjectsPage() {
-  await requireOwner(); const supabase = await createSupabaseServerClient(); const { data: projects } = await supabase.from("projects").select("*").order("updated_at", { ascending: false });
-  return <><WorkspaceHeading eyebrow="Delivery" title="Projects" description="Projects are created when you approve a listing request and remain private to you and their assigned clients." /><div className="space-y-3">{projects?.map((project) => <Link key={project.id} href={`/owner/projects/${project.id}`} className="block rounded-xl border bg-card p-5 hover:bg-muted/30"><div className="grid gap-5 sm:grid-cols-[1fr_15rem] sm:items-center"><div><div className="flex flex-wrap gap-3"><span className="font-mono text-xs text-muted-foreground">{project.reference_code}</span><StatusBadge value={project.status} /></div><h2 className="mt-2 text-2xl">{project.title}</h2><p className="mt-2 text-sm text-muted-foreground">{project.summary}</p></div><div><div className="mb-2 flex justify-between text-xs"><span>{project.progress}%</span><span>Target {formatDate(project.target_date)}</span></div><Progress value={project.progress} /></div></div></Link>)}{!projects?.length ? <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">No projects yet. Approve a listing request to create one.</p> : null}</div></>;
+  await requireOwner();
+  const supabase = await createSupabaseServerClient();
+  const [projectsResult, stagesResult, milestonesResult] = await Promise.all([
+    supabase
+      .from("projects")
+      .select("id, reference_code, title, property_address_short, seller_nickname, summary, status, progress, start_date, target_date, official_assessment_revision_id")
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("project_stages")
+      .select("id, project_id, code, status, position, planned_start_date, planned_end_date, actual_started_at, actual_completed_at, skip_reason")
+      .order("position"),
+    supabase
+      .from("milestones")
+      .select("id, project_id, project_stage_id, title, description, status, due_date, completed_at, position, client_visible")
+      .order("position"),
+  ]);
+
+  if (projectsResult.error || stagesResult.error || milestonesResult.error) {
+    throw new Error("The project board could not be loaded.");
+  }
+
+  const projects: BoardProject[] = (projectsResult.data ?? []).map((project) => ({
+    id: project.id,
+    referenceCode: project.reference_code,
+    title: project.title,
+    propertyAddressShort: project.property_address_short,
+    sellerNickname: project.seller_nickname,
+    summary: project.summary,
+    status: project.status,
+    progress: project.progress,
+    startDate: project.start_date,
+    targetDate: project.target_date,
+    officialAssessmentRevisionId: project.official_assessment_revision_id,
+  }));
+  const stages: BoardStage[] = (stagesResult.data ?? []).map((stage) => ({
+    kind: "stage",
+    id: stage.id,
+    projectId: stage.project_id,
+    title: listingStageLabels[stage.code],
+    code: stage.code,
+    status: stage.status,
+    position: stage.position,
+    plannedStartDate: stage.planned_start_date,
+    plannedEndDate: stage.planned_end_date,
+    actualStartedAt: stage.actual_started_at,
+    actualCompletedAt: stage.actual_completed_at,
+    skipReason: stage.skip_reason,
+  }));
+  const milestones: BoardMilestone[] = (milestonesResult.data ?? []).map((milestone) => ({
+    kind: "milestone",
+    id: milestone.id,
+    projectId: milestone.project_id,
+    title: milestone.title,
+    description: milestone.description,
+    status: milestone.status,
+    position: milestone.position,
+    dueDate: milestone.due_date,
+    completedAt: milestone.completed_at,
+    projectStageId: milestone.project_stage_id,
+    clientVisible: milestone.client_visible,
+  }));
+
+  return (
+    <>
+      <WorkspaceHeading
+        eyebrow="Delivery control"
+        title="Project board"
+        description="See every listing phase against time, switch to status-based work queues, and update the plan without losing seller approval safeguards."
+      />
+      <Suspense fallback={<ProjectBoardSkeleton />}>
+        <ProjectBoard
+          projects={projects}
+          stages={stages}
+          milestones={milestones}
+          today={new Date().toISOString().slice(0, 10)}
+        />
+      </Suspense>
+    </>
+  );
+}
+
+function ProjectBoardSkeleton() {
+  return (
+    <div className="space-y-5" aria-label="Loading project board">
+      <Skeleton className="h-32 w-full rounded-xl" />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Skeleton className="h-16 rounded-xl" />
+        <Skeleton className="h-16 rounded-xl" />
+        <Skeleton className="h-16 rounded-xl" />
+      </div>
+      <Skeleton className="h-[32rem] w-full rounded-xl" />
+    </div>
+  );
 }

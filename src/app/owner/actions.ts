@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireOwner } from "@/lib/auth";
@@ -17,9 +18,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   assessmentSubmissionSchema, bookingStatusSchema,
   isBookingTransitionAllowed, isProjectTransitionAllowed, milestoneSchema,
+  milestoneUpdateSchema,
   projectMemberEmailSchema, projectRequestDecisionSchema,
   projectApproverSchema, projectProgressSchema, projectStageSchema,
-  projectUpdateSchema, serviceSchema, validateProgressForStatus,
+  projectUpdateSchema, serviceSchema, validateProgressForStatus, zodFieldErrors,
 } from "@/lib/validation";
 import type { Json } from "@/types/database.generated";
 import type { ActionState, Milestone, Project, ProjectStage } from "@/types/domain";
@@ -27,6 +29,9 @@ import type { ActionState, Milestone, Project, ProjectStage } from "@/types/doma
 function value(formData: FormData, key: string) { return formData.get(key); }
 function checked(formData: FormData, key: string) { return formData.get(key) === "on"; }
 function failure(message: string): never { throw new Error(message); }
+function actionError(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 export async function createServiceAction(formData: FormData) {
   const auth = await requireOwner();
@@ -171,7 +176,21 @@ export async function submitAssessmentPlanAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   await submitAssessmentPlan(supabase, auth.userId, parsed.data.projectId, parsed.data.reason);
   revalidatePath(`/owner/projects/${parsed.data.projectId}`);
+  revalidatePath("/owner/projects");
   revalidatePath(`/portal/projects/${parsed.data.projectId}`);
+}
+
+export async function updateProjectStageFromBoardAction(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await updateProjectStageAction(formData);
+    return { status: "success", message: "Stage updated." };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { status: "error", message: actionError(error, "The stage could not be updated.") };
+  }
 }
 
 export async function updateProjectStageAction(formData: FormData) {
@@ -308,6 +327,7 @@ export async function updateProjectStageAction(formData: FormData) {
   }
 
   revalidatePath(`/owner/projects/${parsed.data.projectId}`);
+  revalidatePath("/owner/projects");
   revalidatePath(`/portal/projects/${parsed.data.projectId}`);
 }
 
@@ -439,6 +459,7 @@ export async function updateProjectProgressAction(formData: FormData) {
   }
 
   revalidatePath(`/owner/projects/${parsed.data.projectId}`);
+  revalidatePath("/owner/projects");
   revalidatePath(`/portal/projects/${parsed.data.projectId}`);
   revalidatePath("/portal");
 }
@@ -447,7 +468,7 @@ export async function addMilestoneAction(formData: FormData) {
   const auth = await requireOwner();
   const parsed = milestoneSchema.safeParse({
     projectId: value(formData, "projectId"),
-    projectStageId: value(formData, "projectStageId"),
+    projectStageId: value(formData, "projectStageId") === "none" ? "" : value(formData, "projectStageId"),
     title: value(formData, "title"),
     description: value(formData, "description"),
     status: value(formData, "status"),
@@ -526,13 +547,188 @@ export async function addMilestoneAction(formData: FormData) {
   }
 
   revalidatePath(`/owner/projects/${parsed.data.projectId}`);
+  revalidatePath("/owner/projects");
   revalidatePath(`/portal/projects/${parsed.data.projectId}`);
+}
+
+export async function updateMilestoneFromBoardAction(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const auth = await requireOwner();
+  const parsed = milestoneUpdateSchema.safeParse({
+    projectId: value(formData, "projectId"),
+    milestoneId: value(formData, "milestoneId"),
+    projectStageId: value(formData, "projectStageId") === "none" ? "" : value(formData, "projectStageId"),
+    title: value(formData, "title"),
+    description: value(formData, "description"),
+    status: value(formData, "status"),
+    dueDate: value(formData, "dueDate"),
+    position: value(formData, "position"),
+    clientVisible: checked(formData, "clientVisible"),
+    changeType: value(formData, "changeType") ?? "minor",
+    changeReason: value(formData, "changeReason") ?? "",
+  });
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: parsed.error.issues[0]?.message ?? "Invalid milestone update.",
+      fieldErrors: zodFieldErrors(parsed.error),
+    };
+  }
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const [{ data: current }, { data: project }] = await Promise.all([
+      supabase
+        .from("milestones")
+        .select("*")
+        .eq("id", parsed.data.milestoneId)
+        .eq("project_id", parsed.data.projectId)
+        .single(),
+      supabase
+        .from("projects")
+        .select("status, progress, official_assessment_revision_id")
+        .eq("id", parsed.data.projectId)
+        .single(),
+    ]);
+    if (!current || !project) failure("Milestone not found.");
+
+    const nextStageId = parsed.data.projectStageId || null;
+    const nextDueDate = parsed.data.dueDate || null;
+    const planChanged =
+      current.title !== parsed.data.title ||
+      current.description !== parsed.data.description ||
+      current.project_stage_id !== nextStageId ||
+      current.due_date !== nextDueDate ||
+      current.position !== parsed.data.position ||
+      current.client_visible !== parsed.data.clientVisible;
+
+    if (
+      project.official_assessment_revision_id &&
+      planChanged &&
+      parsed.data.changeType === "minor" &&
+      (parsed.data.changeReason?.length ?? 0) < 5
+    ) {
+      failure("Explain the milestone adjustment for the audit trail.");
+    }
+
+    const nextMilestone: Milestone = {
+      ...current,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      project_stage_id: nextStageId,
+      status: parsed.data.status,
+      due_date: nextDueDate,
+      position: parsed.data.position,
+      client_visible: parsed.data.clientVisible,
+      completed_at:
+        parsed.data.status === "done" ? current.completed_at ?? new Date().toISOString() : null,
+    };
+
+    if (
+      project.official_assessment_revision_id &&
+      planChanged &&
+      parsed.data.changeType === "material"
+    ) {
+      const [{ data: stages }, { data: milestones }, { count: approverCount }] = await Promise.all([
+        supabase.from("project_stages").select("*").eq("project_id", parsed.data.projectId),
+        supabase.from("milestones").select("*").eq("project_id", parsed.data.projectId),
+        supabase
+          .from("project_members")
+          .select("user_id", { count: "exact", head: true })
+          .eq("project_id", parsed.data.projectId)
+          .eq("is_assessment_approver", true),
+      ]);
+      const prospectiveMilestones = ((milestones ?? []) as Milestone[]).map((milestone) =>
+        milestone.id === current.id ? nextMilestone : milestone,
+      );
+      const planErrors = validateAssessmentPlan(
+        (stages ?? []) as ProjectStage[],
+        prospectiveMilestones,
+        approverCount ?? 0,
+      );
+      if (planErrors.length > 0) failure(planErrors[0]);
+    }
+
+    const { error } = await supabase
+      .from("milestones")
+      .update({
+        title: nextMilestone.title,
+        description: nextMilestone.description,
+        project_stage_id: nextMilestone.project_stage_id,
+        status: nextMilestone.status,
+        due_date: nextMilestone.due_date,
+        position: nextMilestone.position,
+        client_visible: nextMilestone.client_visible,
+        completed_at: nextMilestone.completed_at,
+      })
+      .eq("id", parsed.data.milestoneId)
+      .eq("project_id", parsed.data.projectId);
+    if (error) failure(error.message);
+
+    await writeAuditEvent(supabase, {
+      actorId: auth.userId,
+      action: "milestone.updated",
+      entityType: "milestone",
+      entityId: parsed.data.milestoneId,
+      details: {
+        project_id: parsed.data.projectId,
+        status: parsed.data.status,
+        plan_changed: planChanged,
+        change_type: planChanged ? parsed.data.changeType : null,
+        reason: planChanged ? parsed.data.changeReason || null : null,
+      },
+    });
+
+    if (
+      project.official_assessment_revision_id &&
+      planChanged &&
+      parsed.data.changeType === "material"
+    ) {
+      await submitAssessmentPlan(
+        supabase,
+        auth.userId,
+        parsed.data.projectId,
+        parsed.data.changeReason,
+      );
+    } else if (
+      project.official_assessment_revision_id &&
+      planChanged &&
+      (current.client_visible || parsed.data.clientVisible)
+    ) {
+      const updateText = `The milestone “${parsed.data.title}” was adjusted without changing the approved plan's overall scope. ${parsed.data.changeReason}`;
+      const { error: updateError } = await supabase.from("project_updates").insert({
+        project_id: parsed.data.projectId,
+        title: "Milestone adjusted",
+        body_json: clientUpdateDocument(updateText),
+        body_text: updateText,
+        audience: "client",
+        status_snapshot: project.status,
+        progress_snapshot: project.progress,
+        occurred_at: new Date().toISOString(),
+        created_by: auth.userId,
+      });
+      if (updateError) failure(updateError.message);
+    }
+
+    revalidatePath("/owner/projects");
+    revalidatePath(`/owner/projects/${parsed.data.projectId}`);
+    revalidatePath(`/portal/projects/${parsed.data.projectId}`);
+    return { status: "success", message: "Milestone updated." };
+  } catch (error) {
+    unstable_rethrow(error);
+    return {
+      status: "error",
+      message: actionError(error, "The milestone could not be updated."),
+    };
+  }
 }
 
 export async function setMilestoneStatusAction(milestoneId: string, projectId: string, formData: FormData) {
   const auth = await requireOwner(); const status = String(value(formData, "status") ?? ""); if (!["not_started", "active", "blocked", "done"].includes(status)) failure("Invalid milestone status.");
   const supabase = await createSupabaseServerClient(); const { error } = await supabase.from("milestones").update({ status: status as "not_started" | "active" | "blocked" | "done", completed_at: status === "done" ? new Date().toISOString() : null }).eq("id", milestoneId).eq("project_id", projectId); if (error) failure(error.message);
-  await writeAuditEvent(supabase, { actorId: auth.userId, action: "milestone.status_updated", entityType: "milestone", entityId: milestoneId, details: { status } }); revalidatePath(`/owner/projects/${projectId}`); revalidatePath(`/portal/projects/${projectId}`);
+  await writeAuditEvent(supabase, { actorId: auth.userId, action: "milestone.status_updated", entityType: "milestone", entityId: milestoneId, details: { status } }); revalidatePath("/owner/projects"); revalidatePath(`/owner/projects/${projectId}`); revalidatePath(`/portal/projects/${projectId}`);
 }
 
 export async function assignProjectMemberAction(
