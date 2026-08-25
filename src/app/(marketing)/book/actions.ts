@@ -9,6 +9,7 @@ import type { BookingActionState } from "@/types/domain";
 
 export async function submitBookingRequest(_previous: BookingActionState, formData: FormData): Promise<BookingActionState> {
   const parsed = bookingRequestSchema.safeParse({
+    ownerId: formData.get("ownerId"),
     serviceId: formData.get("serviceId"),
     fullName: formData.get("fullName"),
     email: formData.get("email"),
@@ -26,8 +27,9 @@ export async function submitBookingRequest(_previous: BookingActionState, formDa
   if (!isSupabaseAdminConfigured()) return { status: "error", message: "Booking is not connected yet. Please contact us by email." };
 
   const supabase = createSupabaseAdminClient();
-  const { data: service, error: serviceError } = await supabase.from("booking_services").select("id, active").eq("id", parsed.data.serviceId).eq("active", true).maybeSingle();
-  if (serviceError || !service) return { status: "error", message: "That service is no longer available. Please choose another." };
+  const { data: service, error: serviceError } = await supabase.from("booking_services").select("id, owner_id, active").eq("id", parsed.data.serviceId).eq("owner_id", parsed.data.ownerId).eq("active", true).maybeSingle();
+  const { data: listedOwner } = await supabase.from("owner_project_types").select("owner_id").eq("owner_id", parsed.data.ownerId).eq("project_type", "real_estate_listing").eq("listed", true).maybeSingle();
+  if (serviceError || !service || !listedOwner) return { status: "error", message: "That appointment is no longer available. Please choose another." };
 
   const { data: settings } = await supabase.from("site_settings").select("booking_lead_hours, booking_horizon_days").eq("singleton", true).single();
   const preferredTime = Date.parse(parsed.data.preferredAt);
@@ -43,6 +45,7 @@ export async function submitBookingRequest(_previous: BookingActionState, formDa
   const referenceCode = generateBookingReference();
   const { error } = await supabase.from("booking_requests").insert({
     reference_code: referenceCode,
+    owner_id: parsed.data.ownerId,
     service_id: parsed.data.serviceId,
     full_name: parsed.data.fullName,
     email: parsed.data.email,
@@ -56,6 +59,6 @@ export async function submitBookingRequest(_previous: BookingActionState, formDa
   });
   if (error) return { status: "error", message: "We couldn’t save the request. Please try again shortly." };
 
-  await supabase.from("audit_events").insert({ action: "booking.requested", entity_type: "booking_request", details: { reference_code: referenceCode, service_id: parsed.data.serviceId } });
+  await supabase.from("audit_events").insert({ action: "booking.requested", entity_type: "booking_request", details: { reference_code: referenceCode, service_id: parsed.data.serviceId, owner_id: parsed.data.ownerId } });
   return { status: "success", message: "Your request is safely in the queue.", referenceCode };
 }

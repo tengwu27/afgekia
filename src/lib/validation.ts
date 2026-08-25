@@ -51,7 +51,8 @@ export const changePasswordSchema = z
 
 export const bookingRequestSchema = z
   .object({
-    serviceId: z.string().uuid("Choose a service."),
+    ownerId: z.string().uuid("Choose a project owner."),
+    serviceId: z.string().uuid("Choose an appointment type."),
     fullName: z.string().trim().min(2).max(120),
     email: emailSchema,
     phone: z.string().trim().max(40).optional().transform((value) => value || null),
@@ -102,11 +103,60 @@ export const bookingRequestSchema = z
     }
   });
 
-export const createMemberSchema = z.object({
+export const createOwnerSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   email: emailSchema,
-  role: z.enum(["admin", "client"]),
   timezone: ianaTimezoneSchema.default("America/Los_Angeles"),
+});
+
+export const registrationSchema = z
+  .object({
+    fullName: z.string().trim().min(2).max(120),
+    email: emailSchema,
+    password: passwordSchema,
+    confirmPassword: z.string(),
+    timezone: ianaTimezoneSchema,
+    privacyConsent: z.literal("on"),
+    formStartedAt: z.coerce.number().int().positive(),
+    website: z.string().max(0, "Please leave the website field empty."),
+  })
+  .superRefine((input, context) => {
+    if (input.password !== input.confirmPassword) {
+      context.addIssue({ code: "custom", path: ["confirmPassword"], message: "The passwords do not match." });
+    }
+    const elapsed = Date.now() - input.formStartedAt;
+    if (elapsed < 3_000 || elapsed > 7_200_000) {
+      context.addIssue({ code: "custom", path: ["formStartedAt"], message: "Please refresh and try again." });
+    }
+  });
+
+export const projectRequestSchema = z
+  .object({
+    ownerId: z.string().uuid("Choose a project owner."),
+    propertyAddressShort: z.string().trim().min(2).max(100),
+    sellerNickname: z.string().trim().min(1).max(50),
+    summary: z.string().trim().min(20).max(600),
+    details: z.string().trim().max(12_000),
+    privacyConsent: z.literal("on"),
+    formStartedAt: z.coerce.number().int().positive(),
+    website: z.string().max(0, "Please leave the website field empty."),
+  })
+  .superRefine((input, context) => {
+    const elapsed = Date.now() - input.formStartedAt;
+    if (elapsed < 3_000 || elapsed > 7_200_000) {
+      context.addIssue({ code: "custom", path: ["formStartedAt"], message: "Please refresh and try again." });
+    }
+  });
+
+export const projectRequestDecisionSchema = z.object({
+  requestId: z.string().uuid(),
+  decision: z.enum(["approved", "declined"]),
+  ownerResponse: z.string().trim().max(2000).optional(),
+});
+
+export const projectMemberEmailSchema = z.object({
+  projectId: z.string().uuid(),
+  email: emailSchema,
 });
 
 export const serviceSchema = z.object({
@@ -118,7 +168,8 @@ export const serviceSchema = z.object({
 });
 
 export const projectSchema = z.object({
-  title: z.string().trim().min(2).max(160),
+  propertyAddressShort: z.string().trim().min(2).max(100),
+  sellerNickname: z.string().trim().min(1).max(50),
   summary: z.string().trim().min(20).max(600),
   description: z.string().trim().max(12_000),
   clientUserId: z.string().uuid().optional().or(z.literal("")),
@@ -126,21 +177,118 @@ export const projectSchema = z.object({
   targetDate: z.string().optional(),
 });
 
-export const projectProgressSchema = z.object({
+export const projectProgressSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    status: z.enum(["planning", "active", "on_hold", "completed", "archived"]),
+    progress: z.coerce.number().int().min(0).max(100),
+    targetDate: z.string().optional(),
+    targetChangeType: z.enum(["minor", "material"]),
+    targetChangeReason: z.string().trim().max(500).optional(),
+  })
+  .superRefine((input, context) => {
+    if (
+      input.targetChangeType === "material" &&
+      (input.targetChangeReason?.length ?? 0) < 10
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["targetChangeReason"],
+        message: "Describe the material target-date change for the sellers.",
+      });
+    }
+  });
+
+export const milestoneSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    projectStageId: z.string().uuid().optional().or(z.literal("")),
+    title: z.string().trim().min(2).max(160),
+    description: z.string().trim().max(3000),
+    status: z.enum(["not_started", "active", "blocked", "done"]),
+    dueDate: z.string().optional(),
+    position: z.coerce.number().int().min(0).max(10_000),
+    clientVisible: z.boolean(),
+    changeType: z.enum(["minor", "material"]),
+    changeReason: z.string().trim().max(500).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.changeType === "material" && (input.changeReason?.length ?? 0) < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["changeReason"],
+        message: "Describe the material milestone change for the sellers.",
+      });
+    }
+  });
+
+export const projectStageSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    stageId: z.string().uuid(),
+    status: z.enum(["not_started", "active", "blocked", "done", "skipped"]),
+    plannedStartDate: z.string().optional(),
+    plannedEndDate: z.string().optional(),
+    skipReason: z.string().trim().max(500).optional(),
+    changeType: z.enum(["minor", "material"]),
+    changeReason: z.string().trim().max(500).optional(),
+  })
+  .superRefine((input, context) => {
+    if (
+      input.plannedStartDate &&
+      input.plannedEndDate &&
+      input.plannedEndDate < input.plannedStartDate
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["plannedEndDate"],
+        message: "The planned end date cannot be before the start date.",
+      });
+    }
+
+    if (input.status === "skipped" && (input.skipReason?.length ?? 0) < 5) {
+      context.addIssue({
+        code: "custom",
+        path: ["skipReason"],
+        message: "Explain why this stage does not apply.",
+      });
+    }
+
+    if (input.changeType === "material" && (input.changeReason?.length ?? 0) < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["changeReason"],
+        message: "Describe the material change for the sellers.",
+      });
+    }
+  });
+
+export const assessmentSubmissionSchema = z.object({
   projectId: z.string().uuid(),
-  status: z.enum(["planning", "active", "on_hold", "completed", "archived"]),
-  progress: z.coerce.number().int().min(0).max(100),
-  targetDate: z.string().optional(),
+  reason: z.string().trim().max(500).optional(),
 });
 
-export const milestoneSchema = z.object({
+export const assessmentResponseSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    revisionId: z.string().uuid(),
+    response: z.enum(["approved", "changes_requested"]),
+    note: z.string().trim().max(2000).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.response === "changes_requested" && (input.note?.length ?? 0) < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["note"],
+        message: "Describe the change you need in at least 10 characters.",
+      });
+    }
+  });
+
+export const projectApproverSchema = z.object({
   projectId: z.string().uuid(),
-  title: z.string().trim().min(2).max(160),
-  description: z.string().trim().max(3000),
-  status: z.enum(["not_started", "active", "blocked", "done"]),
-  dueDate: z.string().optional(),
-  position: z.coerce.number().int().min(0).max(10_000),
-  clientVisible: z.boolean(),
+  userId: z.string().uuid(),
+  isApprover: z.boolean(),
 });
 
 export const richTextJsonSchema = z.string().transform((value, context) => {
@@ -163,32 +311,7 @@ export const projectUpdateSchema = z.object({
   title: z.string().trim().min(2).max(180),
   bodyJson: richTextJsonSchema,
   bodyText: z.string().trim().min(1).max(12_000),
-  audience: z.enum(["staff", "client"]),
-});
-
-export const portfolioSchema = z.object({
-  sourceProjectId: z.string().uuid().optional().or(z.literal("")),
-  slug: z.string().trim().regex(slugPattern).max(180),
-  eyebrow: z.string().trim().max(80),
-  title: z.string().trim().min(2).max(180),
-  summary: z.string().trim().min(20).max(600),
-  bodyJson: richTextJsonSchema,
-  bodyText: z.string().trim().min(1).max(20_000),
-  coverPath: z.string().trim().max(500).optional(),
-  accent: z.enum(["olive", "terracotta", "gold", "plum"]),
-  status: z.enum(["draft", "published", "archived"]),
-  featured: z.boolean(),
-});
-
-export const articleSchema = z.object({
-  slug: z.string().trim().regex(slugPattern).max(180),
-  title: z.string().trim().min(2).max(180),
-  excerpt: z.string().trim().min(20).max(400),
-  bodyJson: richTextJsonSchema,
-  bodyText: z.string().trim().min(1).max(30_000),
-  coverPath: z.string().trim().max(500).optional(),
-  status: z.enum(["draft", "published", "archived"]),
-  featured: z.boolean(),
+  audience: z.enum(["owner", "client"]),
 });
 
 export const bookingStatusSchema = z.object({
@@ -204,17 +327,6 @@ export const bookingStatusSchema = z.object({
   adminNotes: z.string().trim().max(3000).optional(),
 });
 
-export const settingsSchema = z.object({
-  businessName: z.string().trim().min(1).max(80),
-  tagline: z.string().trim().min(1).max(180),
-  description: z.string().trim().min(1).max(1200),
-  contactEmail: emailSchema,
-  phone: z.string().trim().max(40).optional(),
-  address: z.string().trim().max(240).optional(),
-  timezone: ianaTimezoneSchema,
-  bookingLeadHours: z.coerce.number().int().min(0).max(720),
-  bookingHorizonDays: z.coerce.number().int().min(1).max(730),
-});
 
 export function zodFieldErrors(error: z.ZodError): Record<string, string[]> {
   const flattened = z.flattenError(error);

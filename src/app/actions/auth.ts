@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { Route } from "next";
 
 import { writeAuditEvent } from "@/lib/audit";
+import { accountDestination } from "@/lib/access";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { changePasswordSchema, loginSchema, zodFieldErrors } from "@/lib/validation";
@@ -14,14 +15,14 @@ export async function loginAction(_previous: ActionState, formData: FormData): P
   if (!parsed.success) return { status: "error", message: "Check your email and password.", fieldErrors: zodFieldErrors(parsed.error) };
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
-  if (error || !data.user) return { status: "error", message: "Those credentials were not recognized." };
+  if (error || !data.user) return { status: "error", message: error?.code === "email_not_confirmed" ? "Your registration is still awaiting administrator activation." : "Those credentials were not recognized." };
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single();
   if (!profile || profile.state !== "active") {
     await supabase.auth.signOut();
-    return { status: "error", message: "This account is suspended. Contact the site owner." };
+    return { status: "error", message: profile?.state === "pending" ? "Your registration is still awaiting administrator activation." : "This account is suspended. Contact an administrator." };
   }
   await writeAuditEvent(supabase, { actorId: data.user.id, action: "auth.signed_in", entityType: "profile", entityId: data.user.id });
-  let destination: Route = profile.must_change_password ? "/account/security" : profile.role === "client" ? "/portal" : "/admin";
+  let destination: Route = accountDestination(profile.role, profile.must_change_password);
   if (parsed.data.next?.startsWith("/") && !parsed.data.next.startsWith("//") && !profile.must_change_password) destination = parsed.data.next as Route;
   redirect(destination);
 }
@@ -49,5 +50,5 @@ export async function changePasswordAction(_previous: ActionState, formData: For
   if (profileError) return { status: "error", message: "The password changed, but the account flag did not update. Contact an administrator." };
   await writeAuditEvent(supabase, { actorId: userId, action: "auth.password_changed", entityType: "profile", entityId: userId });
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  redirect(profile?.role === "client" ? "/portal" : "/admin");
+  redirect(profile ? accountDestination(profile.role, false) : "/login");
 }

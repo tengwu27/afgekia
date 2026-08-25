@@ -1,31 +1,25 @@
 # Afgekia
 
-Afgekia is a mobile-first business-assistance website with a public publishing and booking surface, an invitation-only client workspace, and a protected owner/staff administration area.
+Afgekia is a private, mobile-first workspace for coordinating real-estate listing projects from assessment through closing. Next.js 16.3 and React 19 run on Vercel; Supabase provides Database, Auth, and Storage.
 
-The application uses Next.js 16.3, React 19, strict TypeScript, Tailwind CSS 4, shadcn/Radix, TipTap, and Supabase Database/Auth/Storage. It is designed for Vercel hosting and a native Vercel–Supabase integration.
+## Product surface
 
-## What is included
+- Public homepage, privacy notice, registration, login, and owner-routed booking requests.
+- Active clients submit listing-project requests at `/request` without mixing in scheduling.
+- `/portal` contains a client's requests, assigned projects, bookings, assessment approvals, and security.
+- `/owner` contains only that owner's requests, projects, appointment types, bookings, media, and AI project assistance.
+- `/admin` contains account administration only: pending client activation, owner creation, public owner listing, password reset, and safe suspension.
+- Listing projects use an address and seller nickname, eight ordered stages, milestones, explicit progress, dated updates, and an assessment plan that becomes official only after required client approvals.
 
-- Public home, services, work, work detail, insights, insight detail, privacy, login, and booking-request routes.
-- Public-safe portfolio records separated structurally from private project records, with staff-only provenance links.
-- Server-only booking writes with Zod validation, honeypot and elapsed-time checks, active-service verification, booking-window rules, per-email throttling, and generated references.
-- Invitation-only password authentication with suspended-account enforcement and mandatory first-login password replacement.
-- Client-only assigned projects, visible milestones, client-audience updates, and explicitly linked booking history.
-- Admin projects, progress/status workflows, milestones, updates, bookings, services, clients, publishing, media, and settings.
-- Owner-only staff account creation and access management. Temporary passwords are generated, shown once, never stored by the application, and immediately force replacement.
-- Public image storage with MIME and size restrictions; private files and uploads are intentionally absent.
-- Audit events for authentication and administrative mutations.
-- Migrations, deterministic public seed content, RLS/grant pgTAP assertions, Vitest unit tests, and Playwright journeys.
-
-Email or browser notifications are not sent in this MVP. Published content already has stable IDs and timestamps so a later idempotent notification outbox can be added without treating clients as subscribers.
+Work, Insights, the public Services catalog, portfolio publishing, and article publishing have been removed. Media storage and TipTap structured project updates remain. Email, notifications, calendar availability, Zoom, payments, and password-recovery email are not implemented.
 
 ## Requirements
 
-- Node.js 22 (`.nvmrc` and `engines.node` are pinned)
+- Node.js 22
 - npm
-- Docker Desktop or another Docker-compatible runtime for local Supabase
+- Docker Desktop or a compatible runtime for local Supabase
 - Supabase CLI access for hosted environment management
-- Vercel CLI access for project linking and environment inspection
+- Vercel CLI access for deployments and environment inspection
 
 ## Local setup
 
@@ -43,103 +37,97 @@ Email or browser notifications are not sent in this MVP. Published content alrea
    npm run db:types
    ```
 
-3. Copy the variable names from `.env.example` into `.env.local` and fill them from `supabase status`:
+3. Copy `.env.example` to `.env.local` and provide the Supabase values. All secret keys are server-only and must never use a `NEXT_PUBLIC_` prefix.
 
-   ```text
-   NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000
-   NEXT_PUBLIC_SUPABASE_URL=...
-   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-   SUPABASE_URL=...
-   SUPABASE_SECRET_KEY=...
-   ```
-
-   `SUPABASE_SECRET_KEY` is server-only. Never prefix it with `NEXT_PUBLIC_`, expose it to browser code, commit it, print it, or place it in client-editable metadata.
-
-4. Create the first owner through the single-use interactive command:
+4. Create the first administrator through the single-use hidden-password command:
 
    ```bash
-   npm run bootstrap:owner -- --email owner@example.com --name "Owner Name"
+   npm run bootstrap:admin -- --email admin@example.com --name "Administrator Name"
    ```
 
-   The command reads the password without echoing it and refuses to run if an owner exists.
+   The command refuses to run after an administrator exists. On a fresh installation, sign in as the administrator and create the first owner under `/admin/owners`. The migration preserves and lists an existing owner when upgrading an earlier Afgekia database.
 
-5. Start Next.js:
+5. Start the application:
 
    ```bash
    npm run dev
    ```
 
-Without Supabase variables, public routes render deterministic demo content for design review. All writes and private routes fail closed; demo mode is not a substitute for environment setup.
+Without Supabase variables, public pages use deterministic read-only demo data. Writes and protected routes fail closed.
 
 ## Verification
 
-Run application checks independently in CI:
+Run application checks separately:
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
 npm run test:coverage
+npm run test:e2e
 npm run build
 ```
 
-Run the database chain against local Supabase:
+Run the reproducible local database chain:
 
 ```bash
 npm run db:verify
 ```
 
-`db:verify` resets the database, regenerates database types, runs the database linter, executes pgTAP coverage for RLS and grants, and type-checks the generated result. Regenerated type changes should be reviewed and committed with their migration.
+`db:verify` resets the local database, regenerates types, runs database lint, executes pgTAP grant/RLS tests, and type-checks the generated result. Docker must be running.
 
-Playwright starts the app automatically for public journeys:
+Authenticated Playwright journeys use test-only credentials:
 
-```bash
-npm run test:e2e
+```text
+E2E_ADMIN_EMAIL=
+E2E_ADMIN_PASSWORD=
+E2E_OWNER_EMAIL=
+E2E_OWNER_PASSWORD=
+E2E_OWNER_DISPLAY_NAME=
+E2E_SECOND_OWNER_EMAIL=
+E2E_SECOND_OWNER_PASSWORD=
+E2E_CLIENT_EMAIL=
+E2E_CLIENT_PASSWORD=
 ```
 
-Set the optional `E2E_CLIENT_*` and `E2E_ADMIN_*` test-only variables to enable authenticated isolation and role-restriction journeys. Never use production credentials in CI.
+Never use production accounts in browser-test automation.
 
-## Vercel and Supabase environments
+## Environment rollout
 
-Use two Supabase projects:
+Use separate Supabase projects:
 
-- Development supplies local/preview deployments.
-- Production supplies only production deployments.
+- Preview and development deployments use `afgekia-dev`.
+- Production deployments use the production Afgekia project only.
 
-Recommended provisioning sequence:
+Apply the identical ordered migration chain to development first, run pgTAP and the Supabase Security and Performance Advisors, then deploy a preview and smoke-test registration through project approval and booking processing. Before production, take a Supabase backup and record affected table counts. Only then apply the same chain, run `bootstrap:admin`, confirm the preserved owner is listed, and smoke-test the production domain.
 
-1. Sign in with `vercel login` and `supabase login`.
-2. Link this repository to the intended Vercel project.
-3. Install Supabase through the Vercel Marketplace for both environment resources.
-4. Verify that Preview receives development values and Production receives production values for all five application keys in `.env.example`.
-5. Apply the exact migration chain to development, run `npm run db:verify` locally, then review both Supabase Security Advisor and Performance Advisor findings. Apply that same reviewed chain to production—do not edit production manually.
-6. Run the owner bootstrap against production variables once.
-7. configure `NEXT_PUBLIC_SITE_URL` to the canonical production origin and update Supabase Auth URL allow-lists.
-8. Deploy, run the production Supabase advisors once more, then smoke-test public reading, booking submission, admin processing, client isolation, forced password replacement, suspension, publishing/unpublishing, mobile navigation, and error states.
-
-Before public launch, recheck the latest Next.js security advisory/release notes and update to the latest patched 16.3.x release if needed.
+Set `NEXT_PUBLIC_SITE_URL` to each deployment's canonical origin and configure the matching Supabase Auth redirect allow-list. AI credentials belong only in the Vercel environments that should enable the assistant.
 
 ## Security model
 
-- Every exposed application table has RLS plus explicit Data API grants. RLS is repeated even when a route guard exists.
-- Roles live in `public.profiles`; browser-editable Auth user metadata is never an authorization source.
-- Authorization helpers live in an unexposed `private` schema, use fixed search paths, and have restricted execution.
-- The authenticated browser client cannot update profile roles or account state.
-- Anonymous visitors have no booking-table grant; the validated Server Action uses a server secret.
-- Private projects and public portfolio content are independent tables. Source links are staff-only.
-- Authenticated routes are dynamic and receive private/no-store response headers from `proxy.ts`.
-- Rich text is stored as structured JSON and sanitized to an allow-list at render time.
+- Every exposed table has RLS and explicit Data API grants.
+- Roles and account states live in protected `public.profiles` records, not editable Auth metadata.
+- Pending and suspended accounts cannot enter protected routes.
+- Clients see only their requests, memberships, linked bookings, and assigned project content.
+- Owners see only resources assigned to them. Clients are added to a project only by exact registered email.
+- Administrators manage accounts and public-safe owner listings but cannot read request, project, booking, or media contents.
+- Public booking writes use a server-only Supabase secret; anonymous callers receive no booking-table access.
+- Registration and public booking actions validate lengths, consent, honeypots, elapsed time, and throttling.
+- Private authorization and workflow helpers live in the unexposed `private` schema with fixed search paths and restricted execution.
+- Rich text is stored as structured JSON and sanitized at render time.
+- Assistant data tools run through the signed-in Supabase session, so RLS filters facts before they reach the model.
 
 ## Project structure
 
 ```text
-src/app/(marketing)     Public pages and booking action
+src/app/(marketing)     Public pages, registration, project intake, and booking
 src/app/portal          Client workspace
-src/app/admin           Staff/owner administration and mutations
+src/app/owner           Operational owner workspace
+src/app/admin           Account-only administration
 src/lib/supabase        Browser, server, secret, and proxy clients
-src/types               Database and domain types
-supabase/migrations     Ordered database changes
-supabase/tests          pgTAP RLS/grant checks
-tests/e2e               Playwright journeys
-scripts                 Owner bootstrap tooling
+src/types               Generated database and application types
+supabase/migrations     Forward-only database migrations
+supabase/tests          pgTAP grant and RLS assertions
+tests/e2e               Public and authenticated Playwright journeys
+scripts                 Single-use administrator bootstrap
 ```

@@ -1,14 +1,19 @@
 import type { Role } from "@/types/domain";
 
-export function isStaffRole(role: Role) {
-  return role === "owner" || role === "admin";
+export function isAdminRole(role: Role) {
+  return role === "admin";
 }
 
-export function canManageAccount(actor: Role, target: Role) {
-  if (target === "owner" || target === "admin") return actor === "owner";
-  return actor === "owner" || actor === "admin";
+export function isOwnerRole(role: Role) {
+  return role === "owner";
 }
 
 export function defaultWorkspace(role: Role) {
-  return role === "client" ? "/portal" : "/admin";
+  if (role === "client") return "/portal";
+  if (role === "owner") return "/owner";
+  return "/admin";
+}
+
+export function accountDestination(role: Role, mustChangePassword: boolean) {
+  return mustChangePassword ? "/account/security" : defaultWorkspace(role);
 }

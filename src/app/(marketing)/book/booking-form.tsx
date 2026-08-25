@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { BookingService } from "@/types/domain";
+import type { BookingService, OwnerProjectType } from "@/types/domain";
 import { submitBookingRequest } from "./actions";
 
 const initialState = { status: "idle" as const };
@@ -25,7 +25,7 @@ function SubmitButton() {
   return <Button type="submit" size="lg" className="h-11 w-full sm:w-auto" disabled={pending}>{pending ? "Sending request…" : "Send booking request"}</Button>;
 }
 
-export function BookingForm({ services, defaultService }: { services: BookingService[]; defaultService?: string }) {
+export function BookingForm({ services, owners, defaultService }: { services: BookingService[]; owners: OwnerProjectType[]; defaultService?: string }) {
   const [state, action] = useActionState(submitBookingRequest, initialState);
   const startedAtRef = useRef<HTMLInputElement>(null);
   const timezone = useSyncExternalStore(
@@ -35,6 +35,9 @@ export function BookingForm({ services, defaultService }: { services: BookingSer
   );
   const [preferredLocal, setPreferredLocal] = useState("");
   const [alternateLocal, setAlternateLocal] = useState("");
+  const defaultOwner = services.find(service => service.id === defaultService)?.owner_id ?? "";
+  const [ownerId, setOwnerId] = useState(defaultOwner);
+  const availableServices = services.filter(service => service.owner_id === ownerId);
 
   useEffect(() => {
     if (startedAtRef.current) startedAtRef.current.value = String(Date.now());
@@ -50,7 +53,7 @@ export function BookingForm({ services, defaultService }: { services: BookingSer
       <input type="hidden" name="alternateAt" value={alternateLocal ? new Date(alternateLocal).toISOString() : ""} />
       <div className="absolute -left-[10000px]" aria-hidden="true"><Label htmlFor="website">Website</Label><Input id="website" name="website" tabIndex={-1} autoComplete="off" /></div>
       {state.status === "error" ? <Alert variant="destructive"><AlertTitle>Request not sent</AlertTitle><AlertDescription>{state.message}</AlertDescription></Alert> : null}
-      <div className="space-y-2"><Label htmlFor="serviceId">What would you like help with?</Label><select id="serviceId" name="serviceId" defaultValue={defaultService && services.some((service) => service.id === defaultService) ? defaultService : ""} required className="h-11 w-full rounded-lg border bg-background px-3 text-sm"><option value="" disabled>Choose a service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select><ErrorText errors={state.fieldErrors?.serviceId} /></div>
+      <div className="grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="bookingOwnerId">Who would you like to meet?</Label><select id="bookingOwnerId" name="ownerId" value={ownerId} onChange={event => setOwnerId(event.target.value)} required className="h-11 w-full rounded-lg border bg-background px-3 text-sm"><option value="" disabled>Choose an owner</option>{owners.map(owner => <option key={owner.owner_id} value={owner.owner_id}>{owner.display_name}</option>)}</select><ErrorText errors={state.fieldErrors?.ownerId} /></div><div className="space-y-2"><Label htmlFor="serviceId">Appointment type</Label><select key={ownerId} id="serviceId" name="serviceId" defaultValue={defaultService && availableServices.some(service => service.id === defaultService) ? defaultService : ""} required disabled={!ownerId} className="h-11 w-full rounded-lg border bg-background px-3 text-sm"><option value="" disabled>Choose an appointment</option>{availableServices.map(service => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select><ErrorText errors={state.fieldErrors?.serviceId} /></div></div>
       <div className="grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="fullName">Your name</Label><Input id="fullName" name="fullName" autoComplete="name" required maxLength={120} className="h-11" /><ErrorText errors={state.fieldErrors?.fullName} /></div><div className="space-y-2"><Label htmlFor="email">Email</Label><Input id="email" name="email" type="email" inputMode="email" autoComplete="email" required maxLength={320} className="h-11" /><ErrorText errors={state.fieldErrors?.email} /></div></div>
       <div className="space-y-2"><Label htmlFor="phone">Phone <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="phone" name="phone" type="tel" autoComplete="tel" maxLength={40} className="h-11" /><ErrorText errors={state.fieldErrors?.phone} /></div>
       <fieldset><legend className="text-sm font-medium">Times that could work for you</legend><p className="mt-1 text-sm text-muted-foreground">Shown in {timezone.replaceAll("_", " ")}. These are preferences, not confirmed appointments.</p><div className="mt-4 grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="preferredLocal">Preferred time</Label><Input id="preferredLocal" type="datetime-local" value={preferredLocal} onChange={(event) => setPreferredLocal(event.target.value)} required className="h-11" /><ErrorText errors={state.fieldErrors?.preferredAt} /></div><div className="space-y-2"><Label htmlFor="alternateLocal">Alternate time <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="alternateLocal" type="datetime-local" value={alternateLocal} onChange={(event) => setAlternateLocal(event.target.value)} className="h-11" /><ErrorText errors={state.fieldErrors?.alternateAt} /></div></div></fieldset>
