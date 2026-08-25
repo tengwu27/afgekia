@@ -77,6 +77,17 @@ test("registration, activation, request approval, isolation, and exact-email mem
   const request = page.locator("article", { hasText: address });
   await request.getByRole("button", { name: "Approve and create project" }).click();
   await page.goto("/owner/projects");
+  await expect(page.getByRole("heading", { name: "Portfolio timeline" })).toBeVisible();
+  await page.getByRole("tab", { name: "Kanban" }).click();
+  await expect(page.getByRole("heading", { name: "Not started" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Completed" })).toBeVisible();
+  await page.getByRole("tab", { name: "Timeline" }).click();
+  await page.getByRole("button", { name: /Initial assessment/ }).click();
+  await page.getByLabel("Planned start").fill("2026-09-01");
+  await page.getByLabel("Planned end").fill("2026-09-03");
+  await page.getByRole("button", { name: "Save stage" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Initial assessment.*Sep 1, 2026 through Sep 3, 2026/ })).toBeVisible();
   await page.getByRole("link", { name: new RegExp(address) }).click();
   await expect(page.getByRole("heading", { name: projectTitle })).toBeVisible();
   await signOut(page);

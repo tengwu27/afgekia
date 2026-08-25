@@ -222,6 +222,30 @@ export const milestoneSchema = z
     }
   });
 
+export const milestoneUpdateSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    milestoneId: z.string().uuid(),
+    projectStageId: z.string().uuid().optional().or(z.literal("")),
+    title: z.string().trim().min(2).max(160),
+    description: z.string().trim().max(3000),
+    status: z.enum(["not_started", "active", "blocked", "done"]),
+    dueDate: z.string().optional(),
+    position: z.coerce.number().int().min(0).max(10_000),
+    clientVisible: z.boolean(),
+    changeType: z.enum(["minor", "material"]),
+    changeReason: z.string().trim().max(500).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.changeType === "material" && (input.changeReason?.length ?? 0) < 10) {
+      context.addIssue({
+        code: "custom",
+        path: ["changeReason"],
+        message: "Describe the material milestone change for the sellers.",
+      });
+    }
+  });
+
 export const projectStageSchema = z
   .object({
     projectId: z.string().uuid(),
