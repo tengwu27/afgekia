@@ -24,3 +24,7 @@ export function generateBookingReference() {
 export function generateProjectReference() {
   return `PRJ-${randomCharacters(6, READABLE_ALPHABET)}`;
 }
+
+export function generateProjectRequestReference() {
+  return `REQ-${randomCharacters(8, READABLE_ALPHABET)}`;
+}

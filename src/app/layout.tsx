@@ -23,7 +23,7 @@ export const viewport: Viewport = { themeColor: "#f7f2e8", colorScheme: "light" 
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={cn(geist.variable, newsreader.variable)}>
+    <html lang="en" data-scroll-behavior="smooth" className={cn(geist.variable, newsreader.variable)}>
       <body><TooltipProvider>{children}</TooltipProvider></body>
     </html>
   );

@@ -40,21 +40,23 @@ export async function requireAuth(nextPath = "/portal") {
   return auth;
 }
 
-export async function requireStaff(nextPath = "/admin") {
+export async function requireAdmin(nextPath = "/admin") {
   const auth = await requireAuth(nextPath);
-  if (auth.profile.role === "client") redirect("/portal");
+  if (auth.profile.must_change_password) redirect("/account/security");
+  if (auth.profile.role !== "admin") redirect(auth.profile.role === "owner" ? "/owner" : "/portal");
   return auth;
 }
 
-export async function requireOwner() {
-  const auth = await requireStaff("/admin/members");
-  if (auth.profile.role !== "owner") redirect("/admin?error=owner-required");
+export async function requireOwner(nextPath = "/owner") {
+  const auth = await requireAuth(nextPath);
+  if (auth.profile.must_change_password) redirect("/account/security");
+  if (auth.profile.role !== "owner") redirect(auth.profile.role === "admin" ? "/admin" : "/portal");
   return auth;
 }
 
 export async function requireClientWorkspace() {
   const auth = await requireAuth("/portal");
   if (auth.profile.must_change_password) redirect("/account/security");
-  if (auth.profile.role !== "client") redirect("/admin");
+  if (auth.profile.role !== "client") redirect(auth.profile.role === "owner" ? "/owner" : "/admin");
   return auth;
 }

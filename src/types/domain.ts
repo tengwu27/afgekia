@@ -12,7 +12,12 @@ export type ProjectStatus = PublicEnums["project_status"];
 export type MilestoneStatus = PublicEnums["milestone_status"];
 export type UpdateAudience = PublicEnums["update_audience"];
 export type BookingStatus = PublicEnums["booking_status"];
-export type PublishState = PublicEnums["publish_state"];
+export type ProjectType = PublicEnums["project_type"];
+export type ProjectRequestStatus = PublicEnums["project_request_status"];
+export type ListingStageCode = PublicEnums["listing_stage_code"];
+export type ListingStageStatus = PublicEnums["listing_stage_status"];
+export type AssessmentRevisionStatus = PublicEnums["assessment_revision_status"];
+export type AssessmentApprovalStatus = PublicEnums["assessment_approval_status"];
 export type RichTextDocument = JSONContent;
 
 export type SiteSettings = Row<"site_settings">;
@@ -20,11 +25,13 @@ export type BookingService = Row<"booking_services">;
 export type BookingRequest = Row<"booking_requests"> & { service?: BookingService | null };
 export type Profile = Row<"profiles">;
 export type Project = Row<"projects">;
+export type ProjectStage = Row<"project_stages">;
+export type AssessmentPlanRevision = Row<"assessment_plan_revisions">;
+export type AssessmentPlanApproval = Row<"assessment_plan_approvals">;
 export type Milestone = Row<"milestones">;
 export type ProjectUpdate = Row<"project_updates">;
-export type PortfolioUpdate = Row<"portfolio_updates">;
-export type PortfolioItem = Row<"portfolio_items"> & { updates?: PortfolioUpdate[] };
-export type Article = Row<"articles">;
+export type ProjectRequest = Row<"project_requests">;
+export type OwnerProjectType = Row<"owner_project_types">;
 
 export interface ProjectDetail extends Project {
   milestones: Milestone[];
@@ -50,5 +57,9 @@ export interface CredentialActionState extends ActionState {
 }
 
 export interface BookingActionState extends ActionState {
+  referenceCode?: string;
+}
+
+export interface ProjectRequestActionState extends ActionState {
   referenceCode?: string;
 }

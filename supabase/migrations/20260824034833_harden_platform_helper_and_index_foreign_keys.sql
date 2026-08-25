@@ -1,7 +1,13 @@
--- Supabase creates this event-trigger helper to enable RLS automatically on
--- newly created public tables. PostgreSQL invokes it as an event trigger;
--- browser-facing roles do not need direct RPC execution permission.
-revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+-- Some Supabase project generations include this event-trigger helper while
+-- newer projects do not. When present, PostgreSQL invokes it as an event
+-- trigger; browser-facing roles do not need direct RPC execution permission.
+do $$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end;
+$$;
 
 -- Cover every remaining foreign key used for ownership/provenance checks and
 -- delete/update validation. Indexes whose leading column already covers a
